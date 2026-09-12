@@ -2,6 +2,7 @@ package com.stripeclone.api;
 
 import com.stripeclone.api.dto.CancelRequest;
 import com.stripeclone.api.dto.CaptureRequest;
+import com.stripeclone.api.dto.ConfirmRequest;
 import com.stripeclone.api.dto.ChargeResponse;
 import com.stripeclone.api.dto.CreatePaymentIntentRequest;
 import com.stripeclone.api.dto.PaymentIntentResponse;
@@ -100,18 +101,29 @@ public class PaymentIntentController {
                 "/v1/payment_intents");
     }
 
+    /**
+     * Confirms an intent.
+     *
+     * <p>With a payment method and card number in the body, the card goes past the
+     * simulated network first and can be declined there. Without one, the intent is
+     * confirmed directly and only the ledger can refuse it.
+     */
     @PostMapping("/{id}/confirm")
     public ResponseEntity<PaymentIntentResponse> confirm(
             @PathVariable String id,
-            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @RequestBody(required = false) ConfirmRequest request) {
 
         var result = idempotency.execute(
                 idempotencyKey,
                 "POST /v1/payment_intents/" + id + "/confirm",
-                id,
+                request == null ? id : request,
                 PaymentIntentResponse.class,
                 () -> {
-                    PaymentIntent intent = payments.confirm(id);
+                    PaymentIntent intent = (request != null && request.paymentMethod() != null)
+                            ? payments.confirmWithCard(
+                                    id, request.paymentMethod(), request.cardNumber())
+                            : payments.confirm(id);
                     return IdempotencyService.Outcome.ok(
                             PaymentIntentResponse.from(intent), intent.paymentIntentId());
                 });

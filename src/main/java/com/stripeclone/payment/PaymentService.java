@@ -306,6 +306,94 @@ public class PaymentService {
         return repository.findRefund(refund.refundId()).orElseThrow();
     }
 
+
+    // -------------------------------------------------------- payment methods
+
+    /**
+     * Registers a card.
+     *
+     * <p>The number is used to work out the brand, the last four and the fingerprint, and
+     * is then dropped. Nothing that could be replayed is written anywhere.
+     */
+    @Transactional
+    public PaymentMethod createCard(String cardNumber, int expMonth, int expYear) {
+        if (!TestCards.passesLuhn(cardNumber)) {
+            throw PaymentException.invalidRequest("Your card number is invalid.");
+        }
+
+        PaymentMethod method = new PaymentMethod(
+                Ids.paymentMethod(),
+                null,
+                "card",
+                TestCards.brandOf(cardNumber),
+                TestCards.last4(cardNumber),
+                expMonth,
+                expYear,
+                TestCards.fingerprint(cardNumber),
+                null);
+
+        repository.insertPaymentMethod(method);
+        log.debug("Created payment method {} ({} ending {})",
+                method.paymentMethodId(), method.brand(), method.last4());
+        return repository.findPaymentMethod(method.paymentMethodId()).orElseThrow();
+    }
+
+    @Transactional
+    public PaymentMethod attach(String paymentMethodId, String customerId) {
+        repository.findPaymentMethod(paymentMethodId)
+                .orElseThrow(() -> new PaymentMethodNotFoundException(paymentMethodId));
+        repository.findCustomer(customerId)
+                .orElseThrow(() -> new CustomerNotFoundException(customerId));
+
+        repository.attachPaymentMethod(paymentMethodId, customerId);
+        return repository.findPaymentMethod(paymentMethodId).orElseThrow();
+    }
+
+    @Transactional
+    public PaymentMethod detach(String paymentMethodId) {
+        repository.findPaymentMethod(paymentMethodId)
+                .orElseThrow(() -> new PaymentMethodNotFoundException(paymentMethodId));
+        repository.detachPaymentMethod(paymentMethodId);
+        return repository.findPaymentMethod(paymentMethodId).orElseThrow();
+    }
+
+    @Transactional(readOnly = true)
+    public PaymentMethod getPaymentMethod(String paymentMethodId) {
+        return repository.findPaymentMethod(paymentMethodId)
+                .orElseThrow(() -> new PaymentMethodNotFoundException(paymentMethodId));
+    }
+
+    @Transactional(readOnly = true)
+    public List<PaymentMethod> paymentMethodsFor(String customerId) {
+        return repository.findPaymentMethodsForCustomer(customerId);
+    }
+
+    /**
+     * Confirms an intent using a specific card, running it past the simulated network first.
+     *
+     * <p>Two separate things can go wrong and they're worth telling apart. The network can
+     * refuse the card, which is {@link CardDeclinedException}. Or the network can approve it
+     * and the ledger can still refuse because the money isn't there, which is
+     * {@link com.stripeclone.ledger.InsufficientFundsException}. A real processor sees the
+     * same split.
+     */
+    @Transactional
+    public PaymentIntent confirmWithCard(
+            String paymentIntentId, String paymentMethodId, String cardNumber) {
+
+        PaymentMethod method = getPaymentMethod(paymentMethodId);
+        repository.setIntentPaymentMethod(paymentIntentId, method.paymentMethodId());
+
+        TestCards.Outcome outcome = TestCards.outcomeFor(cardNumber);
+        if (!outcome.isApproved()) {
+            log.debug("Card {} declined on intent {}: {}",
+                    method.last4(), paymentIntentId, outcome.declineCode());
+            throw new CardDeclinedException(outcome);
+        }
+
+        return confirm(paymentIntentId);
+    }
+
     @Transactional(readOnly = true)
     public PaymentIntent getIntent(String paymentIntentId) {
         return repository.findIntent(paymentIntentId)

@@ -3,7 +3,7 @@
 Working notes. Each phase gets finished and tested before the next one starts, and each one
 is its own commit.
 
-**Now: Phase 6.** 97 tests green.
+**Now: Phase 7.** 147 tests green.
 
 | Phase | What | State |
 |---|---|---|
@@ -13,8 +13,8 @@ is its own commit.
 | 3 | Payment flow | done |
 | 4 | Outbox | done |
 | 5 | HTTP API | done |
-| 6 | Customers, payment methods | in progress |
-| 7 | Webhooks | |
+| 6 | Customers, payment methods | done |
+| 7 | Webhooks | in progress |
 | 8 | Close out | |
 
 ---
@@ -128,10 +128,27 @@ query.
 
 ## Phase 6 - Customers and payment methods
 
-- [ ] `/v1/customers` CRUD
-- [ ] `/v1/payment_methods`, attach and detach
-- [ ] Stripe's test card numbers, deterministic outcomes
-- [ ] Test: each card produces its documented result and the right ledger state
+- [x] `/v1/customers` create and retrieve
+- [x] `/v1/payment_methods`, attach and detach
+- [x] Stripe's published test card numbers, deterministic outcomes
+- [x] Luhn check, brand detection, fingerprints
+- [x] Confirm with a card runs it past the simulated network first
+- [x] Test: each card produces its documented result and the right ledger state
+- [x] Test: the card number is never stored anywhere
+
+147 tests.
+
+Worth keeping straight: a card can fail two different ways and they mean different things.
+The network refusing it is `CardDeclinedException`. The network approving it and the ledger
+then refusing because the money isn't there is `InsufficientFundsException`. Both come back
+as 402, but the decline codes differ, and only one of them says anything about the balance.
+
+An unrecognised card number declines rather than approves. Defaulting the other way would
+mean a typo in a test passes silently.
+
+Caught by a test: `@Valid` doesn't cascade into a nested record on its own. Without `@Valid`
+on the field itself the inner constraints never run, so a bad expiry month sailed past bean
+validation and hit the database CHECK instead, which came back as a 500.
 
 ## Phase 7 - Webhooks
 

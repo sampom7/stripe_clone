@@ -255,6 +255,107 @@ public class PaymentRepository {
                 .optional();
     }
 
+    // -------------------------------------------------------- payment methods
+
+    public void insertPaymentMethod(PaymentMethod method) {
+        jdbc.sql("""
+                INSERT INTO payment_methods
+                       (payment_method_id, customer_id, type, brand, last4,
+                        exp_month, exp_year, fingerprint)
+                VALUES (:id, :customerId, :type, :brand, :last4,
+                        :expMonth, :expYear, :fingerprint)
+                """)
+                .param("id", method.paymentMethodId())
+                .param("customerId", method.customerId())
+                .param("type", method.type())
+                .param("brand", method.brand())
+                .param("last4", method.last4())
+                .param("expMonth", method.expMonth())
+                .param("expYear", method.expYear())
+                .param("fingerprint", method.fingerprint())
+                .update();
+    }
+
+    public Optional<PaymentMethod> findPaymentMethod(String paymentMethodId) {
+        return jdbc.sql("""
+                SELECT payment_method_id, customer_id, type, brand, last4,
+                       exp_month, exp_year, fingerprint, created_at
+                  FROM payment_methods
+                 WHERE payment_method_id = :id
+                """)
+                .param("id", paymentMethodId)
+                .query(PaymentRepository::mapPaymentMethod)
+                .optional();
+    }
+
+    public List<PaymentMethod> findPaymentMethodsForCustomer(String customerId) {
+        return jdbc.sql("""
+                SELECT payment_method_id, customer_id, type, brand, last4,
+                       exp_month, exp_year, fingerprint, created_at
+                  FROM payment_methods
+                 WHERE customer_id = :customerId
+                 ORDER BY id DESC
+                """)
+                .param("customerId", customerId)
+                .query(PaymentRepository::mapPaymentMethod)
+                .list();
+    }
+
+    public void attachPaymentMethod(String paymentMethodId, String customerId) {
+        jdbc.sql("""
+                UPDATE payment_methods
+                   SET customer_id = :customerId
+                 WHERE payment_method_id = :id
+                """)
+                .param("id", paymentMethodId)
+                .param("customerId", customerId)
+                .update();
+    }
+
+    public void detachPaymentMethod(String paymentMethodId) {
+        jdbc.sql("""
+                UPDATE payment_methods
+                   SET customer_id = NULL
+                 WHERE payment_method_id = :id
+                """)
+                .param("id", paymentMethodId)
+                .update();
+    }
+
+    public void setIntentPaymentMethod(String paymentIntentId, String paymentMethodId) {
+        jdbc.sql("""
+                UPDATE payment_intents
+                   SET payment_method_id = :paymentMethodId, updated_at = now()
+                 WHERE payment_intent_id = :id
+                """)
+                .param("id", paymentIntentId)
+                .param("paymentMethodId", paymentMethodId)
+                .update();
+    }
+
+    public Optional<String> findIntentPaymentMethod(String paymentIntentId) {
+        return jdbc.sql("""
+                SELECT payment_method_id FROM payment_intents
+                 WHERE payment_intent_id = :id AND payment_method_id IS NOT NULL
+                """)
+                .param("id", paymentIntentId)
+                .query(String.class)
+                .optional();
+    }
+
+    private static PaymentMethod mapPaymentMethod(ResultSet rs, int rowNum) throws SQLException {
+        return new PaymentMethod(
+                rs.getString("payment_method_id"),
+                rs.getString("customer_id"),
+                rs.getString("type"),
+                rs.getString("brand"),
+                rs.getString("last4"),
+                rs.getObject("exp_month", Integer.class),
+                rs.getObject("exp_year", Integer.class),
+                rs.getString("fingerprint"),
+                rs.getTimestamp("created_at").toInstant());
+    }
+
     // ----------------------------------------------------------------- mapping
 
     private static final String SELECT_INTENT = """

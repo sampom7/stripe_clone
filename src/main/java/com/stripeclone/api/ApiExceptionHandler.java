@@ -6,11 +6,13 @@ import com.stripeclone.ledger.AccountNotFoundException;
 import com.stripeclone.ledger.InsufficientFundsException;
 import com.stripeclone.ledger.UnbalancedTransactionException;
 import com.stripeclone.money.CurrencyMismatchException;
+import com.stripeclone.payment.CardDeclinedException;
 import com.stripeclone.payment.ChargeNotFoundException;
 import com.stripeclone.payment.CustomerNotFoundException;
 import com.stripeclone.payment.InvalidStateTransitionException;
 import com.stripeclone.payment.PaymentException;
 import com.stripeclone.payment.PaymentIntentNotFoundException;
+import com.stripeclone.payment.PaymentMethodNotFoundException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -36,7 +38,8 @@ public class ApiExceptionHandler {
     private static final Logger log = LoggerFactory.getLogger(ApiExceptionHandler.class);
 
     @ExceptionHandler({PaymentIntentNotFoundException.class, ChargeNotFoundException.class,
-            CustomerNotFoundException.class, AccountNotFoundException.class})
+            CustomerNotFoundException.class, PaymentMethodNotFoundException.class,
+            AccountNotFoundException.class})
     public ResponseEntity<StripeError> handleNotFound(RuntimeException e) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND)
                 .body(StripeError.invalidRequest("resource_missing", e.getMessage(), "id"));
@@ -55,6 +58,13 @@ public class ApiExceptionHandler {
                         "card_declined",
                         "Your card has insufficient funds.",
                         "insufficient_funds"));
+    }
+
+    /** The simulated card network refused it. 402, same as Stripe. */
+    @ExceptionHandler(CardDeclinedException.class)
+    public ResponseEntity<StripeError> handleCardDeclined(CardDeclinedException e) {
+        return ResponseEntity.status(HttpStatus.PAYMENT_REQUIRED)
+                .body(StripeError.cardError(e.code(), e.getMessage(), e.declineCode()));
     }
 
     @ExceptionHandler(InvalidStateTransitionException.class)
