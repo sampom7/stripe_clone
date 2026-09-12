@@ -11,3 +11,7 @@ logging:
     root: WARN
     com.stripeclone: INFO
     org.testcontainers: WARN
+
+# The poller is driven explicitly in tests; a background timer would race the assertions.
+outbox:
+  poll-interval-ms: 3600000

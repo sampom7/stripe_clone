@@ -3,7 +3,7 @@
 Working notes. Each phase gets finished and tested before the next one starts, and each one
 is its own commit.
 
-**Now: Phase 4.** 66 tests green.
+**Now: Phase 5.** 79 tests green.
 
 | Phase | What | State |
 |---|---|---|
@@ -11,8 +11,8 @@ is its own commit.
 | 1 | Ledger core | done |
 | 2 | Idempotency | done |
 | 3 | Payment flow | done |
-| 4 | Outbox | in progress |
-| 5 | HTTP API | |
+| 4 | Outbox | done |
+| 5 | HTTP API | in progress |
 | 6 | Customers, payment methods | |
 | 7 | Webhooks | |
 | 8 | Close out | |
@@ -82,10 +82,28 @@ asked for, credit the customer the rest, one balanced transaction, hold ends at 
 
 ## Phase 4 - Outbox
 
-- [ ] `outbox` table, written inside the business transaction
-- [ ] Poller with backoff
-- [ ] Test: a rolled-back transaction publishes nothing
-- [ ] Test: redelivery after a crash, at-least-once
+- [x] `outbox` table, written inside the business transaction
+- [x] Poller on a timer, `FOR UPDATE SKIP LOCKED` so several can run
+- [x] Doubling backoff, capped at an hour, gives up after 8 attempts
+- [x] Payment operations emit Stripe-named events
+- [x] Test: a rolled-back transaction publishes nothing
+- [x] Test: a failed payment leaves no succeeded event
+- [x] Test: redelivery after a crash, at-least-once
+- [x] Test: a failing handler is retried, not dropped
+- [x] Test: events go out oldest first
+
+79 tests.
+
+The claim and the delivery share a transaction, so a crash mid-delivery rolls the claim
+back and the event gets retried instead of vanishing. Cost is that a slow handler holds a
+row lock, hence the small batch size.
+
+At-least-once, not exactly-once. Crash after the handler succeeds but before the commit and
+the event goes out twice. Nothing to be done about that short of two-phase commit, so
+handlers dedupe on event id.
+
+The backoff cap was dead code at first: the shift was clamped to 10, giving 2048 seconds,
+so the hour cap never came into play. A test caught it.
 
 ## Phase 5 - HTTP API
 

@@ -49,7 +49,7 @@ public abstract class PostgresTestBase {
         // ledger_entries has rules blocking DELETE, so TRUNCATE is the only way to clear
         // it. That is the append-only guarantee working as intended.
         jdbc.sql("""
-                TRUNCATE TABLE refunds, charges, payment_intents, customers,
+                TRUNCATE TABLE outbox, refunds, charges, payment_intents, customers,
                                ledger_entries, ledger_transactions,
                                account_balances, accounts, idempotency_keys
                 RESTART IDENTITY CASCADE

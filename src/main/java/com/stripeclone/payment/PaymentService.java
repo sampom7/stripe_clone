@@ -7,12 +7,16 @@ import com.stripeclone.ledger.LedgerTransaction;
 import com.stripeclone.ledger.TransactionKind;
 import com.stripeclone.money.Amount;
 import com.stripeclone.money.Currency;
+import com.stripeclone.outbox.EventType;
+import com.stripeclone.outbox.OutboxService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -35,10 +39,13 @@ public class PaymentService {
 
     private final PaymentRepository repository;
     private final LedgerService ledger;
+    private final OutboxService outbox;
 
-    public PaymentService(PaymentRepository repository, LedgerService ledger) {
+    public PaymentService(
+            PaymentRepository repository, LedgerService ledger, OutboxService outbox) {
         this.repository = repository;
         this.ledger = ledger;
+        this.outbox = outbox;
     }
 
     @Transactional
@@ -49,6 +56,9 @@ public class PaymentService {
         ledger.createAccount(accountId, AccountType.CUSTOMER, currency);
         Customer customer = new Customer(customerId, email, name, accountId, null);
         repository.insertCustomer(customer);
+
+        outbox.publish(EventType.CUSTOMER_CREATED, customerId,
+                Map.of("id", customerId, "email", email == null ? "" : email));
 
         log.debug("Created customer {} with account {}", customerId, accountId);
         return repository.findCustomer(customerId).orElseThrow();
@@ -88,6 +98,8 @@ public class PaymentService {
                 null);
 
         repository.insertIntent(intent);
+        emit(EventType.PAYMENT_INTENT_CREATED, intent);
+
         log.debug("Created payment intent {} for {}", intentId, request.amount());
         return repository.findIntent(intentId).orElseThrow();
     }
@@ -124,8 +136,11 @@ public class PaymentService {
                     intent.amount(),
                     Amount.zero(intent.currency()));
 
+            PaymentIntent authorized = repository.findIntent(paymentIntentId).orElseThrow();
+            emit(EventType.PAYMENT_INTENT_AMOUNT_CAPTURABLE_UPDATED, authorized);
+
             log.debug("Authorized {} on intent {}", intent.amount(), paymentIntentId);
-            return repository.findIntent(paymentIntentId).orElseThrow();
+            return authorized;
         }
 
         PaymentIntentStateMachine.assertTransition(
@@ -147,8 +162,11 @@ public class PaymentService {
                 Amount.zero(intent.currency()),
                 intent.amount());
 
+        PaymentIntent succeeded = repository.findIntent(paymentIntentId).orElseThrow();
+        emit(EventType.PAYMENT_INTENT_SUCCEEDED, succeeded);
+
         log.debug("Captured {} on intent {}", intent.amount(), paymentIntentId);
-        return repository.findIntent(paymentIntentId).orElseThrow();
+        return succeeded;
     }
 
     /**
@@ -200,9 +218,12 @@ public class PaymentService {
                 Amount.zero(intent.currency()),
                 toCapture);
 
+        PaymentIntent captured = repository.findIntent(paymentIntentId).orElseThrow();
+        emit(EventType.PAYMENT_INTENT_SUCCEEDED, captured);
+
         log.debug("Captured {} of {} on intent {}, returned {}",
                 toCapture, held, paymentIntentId, remainder);
-        return repository.findIntent(paymentIntentId).orElseThrow();
+        return captured;
     }
 
     /**
@@ -225,8 +246,12 @@ public class PaymentService {
         }
 
         repository.setCancellation(paymentIntentId, reason);
+
+        PaymentIntent canceled = repository.findIntent(paymentIntentId).orElseThrow();
+        emit(EventType.PAYMENT_INTENT_CANCELED, canceled);
+
         log.debug("Canceled intent {} ({})", paymentIntentId, reason);
-        return repository.findIntent(paymentIntentId).orElseThrow();
+        return canceled;
     }
 
     /**
@@ -270,6 +295,12 @@ public class PaymentService {
                 Ids.refund(), chargeId, toRefund, reason,
                 Refund.RefundStatus.SUCCEEDED, txnId, null);
         repository.insertRefund(refund);
+
+        outbox.publish(EventType.CHARGE_REFUNDED, chargeId, Map.of(
+                "id", chargeId,
+                "amount_refunded", newRefundedTotal.minorUnits(),
+                "currency", toRefund.currency().name().toLowerCase(),
+                "refunded", newStatus == Charge.ChargeStatus.REFUNDED));
 
         log.debug("Refunded {} of charge {}", toRefund, chargeId);
         return repository.findRefund(refund.refundId()).orElseThrow();
@@ -317,6 +348,29 @@ public class PaymentService {
                 ledgerTxnId,
                 null);
         repository.insertCharge(charge);
+
+        outbox.publish(EventType.CHARGE_SUCCEEDED, charge.chargeId(), Map.of(
+                "id", charge.chargeId(),
+                "payment_intent", paymentIntentId,
+                "amount", amount.minorUnits(),
+                "currency", amount.currency().name().toLowerCase()));
+    }
+
+    /** Queues an event describing an intent's current state. */
+    private void emit(String eventType, PaymentIntent intent) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("id", intent.paymentIntentId());
+        payload.put("object", "payment_intent");
+        payload.put("amount", intent.amount().minorUnits());
+        payload.put("amount_capturable", intent.amountCapturable().minorUnits());
+        payload.put("amount_received", intent.amountReceived().minorUnits());
+        payload.put("currency", intent.currency().name().toLowerCase());
+        payload.put("status", intent.status().wireValue());
+        payload.put("capture_method", intent.captureMethod().wireValue());
+        if (intent.customerId() != null) {
+            payload.put("customer", intent.customerId());
+        }
+        outbox.publish(eventType, intent.paymentIntentId(), payload);
     }
 
     /** What's needed to open an intent. */
