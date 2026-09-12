@@ -112,6 +112,16 @@ curl -X POST http://localhost:8080/v1/payment_intents \
        "merchant_account": "acct_merchant"}'
 ```
 
+There's a walkthrough script that exercises the whole thing and prints what comes back:
+
+```bash
+./scripts/demo.sh
+```
+
+It creates a customer, funds them, registers a card, holds and partially captures a
+payment, refunds part of it, gets a card declined, demonstrates idempotency both ways, then
+prints the ledger and asserts the books still balance.
+
 Interactive docs at `/docs` once it's running, and the OpenAPI document at
 `/v1/openapi.json`.
 

@@ -213,6 +213,14 @@ wrong place. Fix is `api.version=1.44` as a system property in the Surefire conf
 it as `DOCKER_API_VERSION` in the environment does nothing, and neither does putting
 `api.version` in `testcontainers.properties`.
 
+**Seeding money by hand.** Inserting the two sides of a funding transaction as two separate
+INSERTs doesn't work. The balance trigger is deferred to commit but evaluated per row, so
+the first one trips "needs at least 2 entries". Worse, psql without ON_ERROR_STOP carries on
+after the failure and still applies the balance updates, which leaves the projection
+claiming money the ledger never recorded. The health check caught it, which is the one good
+thing about having written the bug: `/actuator/health/ledger` went DOWN with the two drifted
+accounts named. Both entries now go in as one statement inside an explicit transaction.
+
 **Windows named pipe.** Docker Desktop serves on `dockerDesktopLinuxEngine`, not the
 `docker_engine` pipe Testcontainers probes. Set through an OS-activated Maven profile so
 Linux and macOS aren't affected.
