@@ -6,6 +6,26 @@ spring:
     virtual:
       enabled: true
 
+# Spring Boot replaces the main application.yml with this one rather than merging, so
+# anything the tests need has to be repeated here.
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: always
+  health:
+    ledger:
+      enabled: true
+
+springdoc:
+  api-docs:
+    path: /v1/openapi.json
+  swagger-ui:
+    path: /docs
+
 logging:
   level:
     root: WARN

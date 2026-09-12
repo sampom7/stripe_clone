@@ -75,6 +75,14 @@ docker compose up -d      # postgres
 ./mvnw spring-boot:run    # migrations run on startup
 ```
 
+Or run the whole thing in containers:
+
+```bash
+docker compose --profile app up -d
+```
+
+If port 5432 is already taken by another project, `POSTGRES_PORT=5433 docker compose up -d`.
+
 Tests spin up their own Postgres through Testcontainers, so the compose stack isn't needed
 for them:
 
@@ -116,7 +124,11 @@ src/main/java/com/stripeclone/
   api/           Controllers, DTOs, error mapping.
 ```
 
-Build status and the phase-by-phase plan are in [PROGRESS.md](PROGRESS.md).
+Around 190 tests, all against a real Postgres through Testcontainers. The ones worth
+looking at first are the concurrency tests in `LedgerConcurrencyTest`, since they're the
+reason for most of the design decisions above.
+
+Build notes and the phase-by-phase log are in [PROGRESS.md](PROGRESS.md).
 
 ## License
 

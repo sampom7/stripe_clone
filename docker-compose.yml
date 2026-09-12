@@ -7,7 +7,9 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
     ports:
-      - "5432:5432"
+      # Host port is overridable, because 5432 is very often already taken by another
+      # project's Postgres. POSTGRES_PORT=5433 docker compose up -d to move it.
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -15,6 +17,22 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  app:
+    build: .
+    container_name: stripe-clone-app
+    # Under the "app" profile so `docker compose up -d` still starts only Postgres,
+    # which is what you want when running the application from an IDE.
+    profiles: ["app"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/stripe_clone
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: postgres
+    ports:
+      - "${APP_PORT:-8080}:8080"
 
 volumes:
   postgres_data:

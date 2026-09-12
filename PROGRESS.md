@@ -3,7 +3,7 @@
 Working notes. Each phase gets finished and tested before the next one starts, and each one
 is its own commit.
 
-**Now: Phase 8.** 187 tests green.
+**Done.** 190 tests green.
 
 | Phase | What | State |
 |---|---|---|
@@ -15,7 +15,7 @@ is its own commit.
 | 5 | HTTP API | done |
 | 6 | Customers, payment methods | done |
 | 7 | Webhooks | done |
-| 8 | Close out | in progress |
+| 8 | Close out | done |
 
 ---
 
@@ -180,10 +180,25 @@ matters because the outbox is at-least-once and the handler will see some events
 
 ## Phase 8 - Close out
 
-- [ ] OpenAPI doc
-- [ ] Health check that asserts the ledger balances
-- [ ] `docker compose up` runs the app too
-- [ ] README final pass
+- [x] OpenAPI at `/v1/openapi.json`, Swagger UI at `/docs`
+- [x] `/actuator/health/ledger` sums the entries and checks the projection
+- [x] Dockerfile, and an `app` compose profile that runs the whole stack
+- [x] End-to-end smoke test over HTTP
+- [x] README final pass
+
+190 tests.
+
+The health check is the interesting one. Normal health checks tell you the process is up
+and the database answers, neither of which says the system is still correct. This one sums
+every entry and compares the projection against what the entries say. If it goes down the
+answer isn't to restart, it's to stop writing and go read the ledger.
+
+Host ports in compose are overridable. 5432 was already taken by another project's Postgres
+on my machine, which would have been an annoying first five minutes for anyone cloning this.
+
+Verified by actually running it: built the image, brought up the stack, took a payment,
+had a card declined with the right code, confirmed the ledger still balanced and the events
+were recorded.
 
 ---
 

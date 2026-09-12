@@ -30,6 +30,30 @@ management:
   endpoint:
     health:
       show-details: always
+  health:
+    # The ledger check scans every entry, so it is not part of the default health
+    # response. Read it directly at /actuator/health/ledger, on a slow schedule.
+    ledger:
+      enabled: true
+
+springdoc:
+  api-docs:
+    path: /v1/openapi.json
+  swagger-ui:
+    path: /docs
+
+outbox:
+  poll-interval-ms: 1000
+  batch-size: 50
+  max-attempts: 8
+  base-backoff-seconds: 2
+
+webhook:
+  poll-interval-ms: 2000
+  batch-size: 20
+  max-attempts: 8
+  base-backoff-seconds: 60
+  request-timeout-seconds: 10
 
 logging:
   level:
