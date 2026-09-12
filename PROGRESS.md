@@ -6,7 +6,7 @@ is its own commit.
 **Done.** 190 tests green.
 
 | Phase | What | State |
-|---|---|---|
+| --- | --- | --- |
 | 0 | Toolchain, teardown | done |
 | 1 | Ledger core | done |
 | 2 | Idempotency | done |

@@ -52,7 +52,7 @@ The same table drives webhook delivery.
 ## Stack
 
 | | |
-|---|---|
+| --- | --- |
 | Java | 21 LTS |
 | Framework | Spring Boot 3.5, web + JDBC + actuator |
 | Database | PostgreSQL 16 |
@@ -108,8 +108,34 @@ Stripe's error and list envelopes.
 curl -X POST http://localhost:8080/v1/payment_intents \
   -H "Idempotency-Key: key_12345" \
   -H "Content-Type: application/json" \
-  -d '{"amount": 2000, "currency": "usd", "customer": "cus_abc"}'
+  -d '{"amount": 2000, "currency": "usd", "customer": "cus_abc",
+       "merchant_account": "acct_merchant"}'
 ```
+
+Interactive docs at `/docs` once it's running, and the OpenAPI document at
+`/v1/openapi.json`.
+
+| | |
+| --- | --- |
+| `POST /v1/customers` | create a customer |
+| `POST /v1/payment_methods` | register a card |
+| `POST /v1/payment_methods/:id/attach` | attach to a customer, and `/detach` |
+| `POST /v1/payment_intents` | start a payment |
+| `POST /v1/payment_intents/:id/confirm` | take the money, or hold it |
+| `POST /v1/payment_intents/:id/capture` | capture a held payment, fully or partly |
+| `POST /v1/payment_intents/:id/cancel` | release the hold |
+| `POST /v1/refunds` | refund a charge |
+| `POST /v1/webhook_endpoints` | subscribe to events |
+| `GET /v1/events` | read what happened |
+
+Card behaviour follows Stripe's test numbers: `4242424242424242` succeeds,
+`4000000000000002` declines, `4000000000009995` reports insufficient funds.
+
+### Health
+
+`/actuator/health/ledger` sums every ledger entry and compares the balance projection
+against the entries behind it. If it reports down, money has gone missing somewhere, and
+the answer is to stop writes and read the entries rather than restart anything.
 
 ## Repo layout
 
