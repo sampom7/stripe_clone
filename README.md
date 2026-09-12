@@ -201,21 +201,23 @@ previous one is green.
 
 - [x] JDK 21 LTS installed locally
 - [x] Maven 3.9.5 available
-- [ ] Restore Maven wrapper (`mvnw`, `mvnw.cmd`, wrapper jar)
-- [ ] Delete Kafka, Redis, JPA, and Lombok code and dependencies
-- [ ] Compose file down to one Postgres 16 service
-- [ ] `./mvnw compile` green
+- [x] Restore Maven wrapper (script-only; no jar to commit)
+- [x] Delete Kafka, Redis, JPA, and Lombok code and dependencies
+- [x] Compose file down to one Postgres 16 service
+- [x] `./mvnw compile` green
 
 ### Phase 1 — The ledger core
 
-- [ ] `Amount` and `Currency` value types with arithmetic and a remainder-returning split
-- [ ] Flyway migrations for accounts, transactions, entries, balances
-- [ ] `LedgerRepository` with explicit SQL and ordered `FOR UPDATE`
-- [ ] `LedgerService.post(transaction)` — the only write path into the ledger
-- [ ] **Test: a posted transaction always sums to zero**
-- [ ] **Test: the whole ledger sums to zero after N random transfers**
-- [ ] **Test: 20 concurrent transfers on one account, no lost updates, no deadlock**
-- [ ] **Test: the balance projection equals the recomputed sum**
+*40 tests green: 23 on money arithmetic, 13 on ledger behaviour, 4 on concurrency.*
+
+- [x] `Amount` and `Currency` value types with arithmetic and a remainder-returning split
+- [x] Flyway migrations for accounts, transactions, entries, balances
+- [x] `LedgerRepository` with explicit SQL and ordered `FOR UPDATE`
+- [x] `LedgerService.post(transaction)` — the only write path into the ledger
+- [x] **Test: a posted transaction always sums to zero**
+- [x] **Test: the whole ledger sums to zero after N random transfers**
+- [x] **Test: 20 concurrent transfers on one account, no lost updates, no deadlock**
+- [x] **Test: the balance projection equals the recomputed sum**
 
 ### Phase 2 — Idempotency
 
@@ -289,18 +291,25 @@ Built directly on the Phase 4 outbox, which is the payoff for that design.
 
 ## Running it
 
-Nothing to run yet. When Phase 1 lands:
-
 ```bash
 docker compose up -d          # Postgres only
-./mvnw spring-boot:run
+./mvnw spring-boot:run        # migrations run on startup
 ```
 
-Tests need Docker running, since Testcontainers starts a real Postgres:
+The test suite needs Docker running; Testcontainers starts its own Postgres, so the
+compose stack is not required for it:
 
 ```bash
 ./mvnw test
 ```
+
+### A note on Docker Engine 29
+
+Testcontainers 1.21 ships a docker-java client that negotiates Docker API 1.32, which
+Engine 29 rejects outright. The failure surfaces as "Could not find a valid Docker
+environment", which reads like Docker is missing rather than too new. The build pins
+`api.version=1.44` in the Surefire configuration to sidestep it, and resolves the Docker
+Desktop named pipe on Windows in the same place.
 
 ---
 

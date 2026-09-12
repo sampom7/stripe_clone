@@ -20,7 +20,21 @@
 
     <properties>
         <java.version>21</java.version>
+        <!-- Empty on Linux/macOS so Testcontainers uses its own discovery. -->
+        <docker.host></docker.host>
     </properties>
+
+    <profiles>
+        <profile>
+            <id>windows-docker-desktop</id>
+            <activation>
+                <os><family>windows</family></os>
+            </activation>
+            <properties>
+                <docker.host>npipe:////./pipe/dockerDesktopLinuxEngine</docker.host>
+            </properties>
+        </profile>
+    </profiles>
 
     <dependencies>
         <dependency>
@@ -81,6 +95,32 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <systemPropertyVariables>
+                        <!--
+                          Docker Engine 29 requires API 1.40 or newer, but the docker-java
+                          client bundled with Testcontainers 1.21 still negotiates 1.32. The
+                          engine answers that with a bare HTTP 400, which Testcontainers
+                          reports only as "Could not find a valid Docker environment" - so
+                          the symptom looks like Docker is absent when it is merely too new.
+                        -->
+                        <api.version>1.44</api.version>
+                    </systemPropertyVariables>
+                    <environmentVariables>
+                        <!--
+                          Docker Desktop on Windows serves its engine on a named pipe that
+                          Testcontainers does not probe by default. Resolving it here means
+                          the build works without the developer exporting DOCKER_HOST.
+                          Empty and therefore ignored on Linux and macOS, where
+                          Testcontainers' own discovery already works.
+                        -->
+                        <DOCKER_HOST>${docker.host}</DOCKER_HOST>
+                    </environmentVariables>
+                </configuration>
             </plugin>
         </plugins>
     </build>
