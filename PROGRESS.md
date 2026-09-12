@@ -3,7 +3,7 @@
 Working notes. Each phase gets finished and tested before the next one starts, and each one
 is its own commit.
 
-**Now: Phase 7.** 147 tests green.
+**Now: Phase 8.** 187 tests green.
 
 | Phase | What | State |
 |---|---|---|
@@ -14,8 +14,8 @@ is its own commit.
 | 4 | Outbox | done |
 | 5 | HTTP API | done |
 | 6 | Customers, payment methods | done |
-| 7 | Webhooks | in progress |
-| 8 | Close out | |
+| 7 | Webhooks | done |
+| 8 | Close out | in progress |
 
 ---
 
@@ -152,12 +152,31 @@ validation and hit the database CHECK instead, which came back as a 500.
 
 ## Phase 7 - Webhooks
 
-- [ ] Endpoint registration
-- [ ] `Stripe-Signature`, HMAC-SHA256 over timestamp and body
-- [ ] Retry with backoff, attempt log
-- [ ] `/v1/events`
-- [ ] Test: signature verifies, tampered body rejected
-- [ ] Test: failing endpoint retried on schedule, gives up eventually
+- [x] Endpoint registration, enable/disable/delete, per-endpoint secret
+- [x] `Stripe-Signature`, HMAC-SHA256 over timestamp and body
+- [x] Fan-out handler on the Phase 4 outbox
+- [x] Separate delivery poller, backoff from a minute to a day
+- [x] `/v1/events` for catching up after an outage, plus delivery replay
+- [x] Test: signature verifies, tampered body rejected, stale timestamp rejected
+- [x] Test: failing endpoint retried on schedule, gives up eventually
+
+187 tests.
+
+Two pollers, not one. The outbox poller must never block on anything external, and this one
+talks to endpoints that may be slow or gone. Sharing would let one dead receiver hold up
+event processing for everyone, since the outbox poller keeps a row lock while its handler
+runs. So the fan-out handler only writes delivery rows and returns.
+
+The timestamp goes *inside* the signed string, not just next to it. If it were only a
+header field you could replay yesterday's body with today's timestamp and the signature
+would still check out. There's a test for exactly that.
+
+Comparison uses `MessageDigest.isEqual` rather than `String.equals`. Normal equals bails
+out at the first differing byte, and how long that took leaks how many leading characters
+were right, which is enough to rebuild a valid signature one character at a time.
+
+The unique constraint on (endpoint, event) is what makes fan-out safe to repeat, which
+matters because the outbox is at-least-once and the handler will see some events twice.
 
 ## Phase 8 - Close out
 

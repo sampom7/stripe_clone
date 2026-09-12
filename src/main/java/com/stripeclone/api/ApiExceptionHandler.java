@@ -13,6 +13,7 @@ import com.stripeclone.payment.InvalidStateTransitionException;
 import com.stripeclone.payment.PaymentException;
 import com.stripeclone.payment.PaymentIntentNotFoundException;
 import com.stripeclone.payment.PaymentMethodNotFoundException;
+import com.stripeclone.webhook.WebhookEndpointNotFoundException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -39,6 +40,7 @@ public class ApiExceptionHandler {
 
     @ExceptionHandler({PaymentIntentNotFoundException.class, ChargeNotFoundException.class,
             CustomerNotFoundException.class, PaymentMethodNotFoundException.class,
+            WebhookEndpointNotFoundException.class, EventController.EventNotFoundException.class,
             AccountNotFoundException.class})
     public ResponseEntity<StripeError> handleNotFound(RuntimeException e) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND)

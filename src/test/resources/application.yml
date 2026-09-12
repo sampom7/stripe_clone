@@ -15,3 +15,6 @@ logging:
 # The poller is driven explicitly in tests; a background timer would race the assertions.
 outbox:
   poll-interval-ms: 3600000
+
+webhook:
+  poll-interval-ms: 3600000
