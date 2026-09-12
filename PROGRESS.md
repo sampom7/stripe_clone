@@ -3,7 +3,7 @@
 Working notes. Each phase gets finished and tested before the next one starts, and each one
 is its own commit.
 
-**Now: Phase 5.** 79 tests green.
+**Now: Phase 6.** 97 tests green.
 
 | Phase | What | State |
 |---|---|---|
@@ -12,8 +12,8 @@ is its own commit.
 | 2 | Idempotency | done |
 | 3 | Payment flow | done |
 | 4 | Outbox | done |
-| 5 | HTTP API | in progress |
-| 6 | Customers, payment methods | |
+| 5 | HTTP API | done |
+| 6 | Customers, payment methods | in progress |
 | 7 | Webhooks | |
 | 8 | Close out | |
 
@@ -107,12 +107,24 @@ so the hour cap never came into play. A test caught it.
 
 ## Phase 5 - HTTP API
 
-- [ ] `/v1/payment_intents` create, retrieve, list
-- [ ] `/confirm`, `/capture`, `/cancel`, and `/v1/refunds`
-- [ ] `Idempotency-Key` header wired through
-- [ ] Prefixed ids, Stripe's error and list envelopes
-- [ ] Cursor pagination
-- [ ] Test: error bodies match Stripe's shape
+- [x] `/v1/payment_intents` create, retrieve, list
+- [x] `/confirm`, `/capture`, `/cancel`, plus `/v1/refunds`, `/v1/charges`, `/v1/customers`
+- [x] `Idempotency-Key` header wired through to Phase 2
+- [x] Prefixed ids, Stripe's error and list envelopes
+- [x] Cursor pagination with `starting_after`
+- [x] Test: error bodies match Stripe's shape for each failure mode
+- [x] Test: same key same body returns the same object, different body is 422
+
+97 tests.
+
+Controllers don't catch anything, which is the point. Every failure goes to one
+`@RestControllerAdvice`. A declined payment is 402 with a decline code, a missing object is
+404 with `resource_missing`, a bad transition is 400, an idempotency clash is 422. The
+first version of this project wrapped every handler in a try/catch returning 500, so the
+advice never ran and a typo'd id looked the same as a database outage.
+
+`has_more` comes from fetching limit+1 rows and trimming, which avoids a second count
+query.
 
 ## Phase 6 - Customers and payment methods
 
