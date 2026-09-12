@@ -221,11 +221,13 @@ previous one is green.
 
 ### Phase 2 — Idempotency
 
-- [ ] `idempotency_keys` table and unique constraint
-- [ ] `IdempotencyService` wrapping a write in the same transaction
-- [ ] Request-hash mismatch returns `422`
-- [ ] **Test: two concurrent identical requests produce one ledger transaction**
-- [ ] **Test: same key, different body, returns 422**
+*48 tests green.*
+
+- [x] `idempotency_keys` table and unique constraint
+- [x] `IdempotencyService` wrapping a write in the same transaction
+- [x] Request-hash mismatch returns `422`
+- [x] **Test: two concurrent identical requests produce one ledger transaction**
+- [x] **Test: same key, different body, returns 422**
 
 ### Phase 3 — Payment flow on the ledger
 

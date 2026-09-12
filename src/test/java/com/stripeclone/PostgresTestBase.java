@@ -50,7 +50,7 @@ public abstract class PostgresTestBase {
         // it. That is the append-only guarantee working as intended.
         jdbc.sql("""
                 TRUNCATE TABLE ledger_entries, ledger_transactions,
-                               account_balances, accounts
+                               account_balances, accounts, idempotency_keys
                 RESTART IDENTITY CASCADE
                 """).update();
     }
