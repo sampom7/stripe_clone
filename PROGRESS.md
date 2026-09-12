@@ -3,15 +3,15 @@
 Working notes. Each phase gets finished and tested before the next one starts, and each one
 is its own commit.
 
-**Now: Phase 3.** 48 tests green.
+**Now: Phase 4.** 66 tests green.
 
 | Phase | What | State |
 |---|---|---|
 | 0 | Toolchain, teardown | done |
 | 1 | Ledger core | done |
 | 2 | Idempotency | done |
-| 3 | Payment flow | in progress |
-| 4 | Outbox | |
+| 3 | Payment flow | done |
+| 4 | Outbox | in progress |
 | 5 | HTTP API | |
 | 6 | Customers, payment methods | |
 | 7 | Webhooks | |
@@ -64,13 +64,21 @@ database instead. `ON CONFLICT DO NOTHING`. Three tests caught it.
 
 ## Phase 3 - Payment flow
 
-- [ ] Payment intent state machine, transitions in one table
-- [ ] Authorize: customer to hold account
-- [ ] Capture: hold to merchant, remainder released on partial capture
-- [ ] Cancel and refund
-- [ ] Test: capture once, customer debited exactly once
-- [ ] Test: partial capture releases the rest, hold account ends at zero
-- [ ] Test: every illegal transition is refused
+- [x] Payment intent state machine, transitions in one table
+- [x] Authorize: customer to a per-intent hold account
+- [x] Capture: hold to merchant, remainder released on partial capture
+- [x] Cancel and refund, full and partial
+- [x] Test: capture once, customer debited exactly once
+- [x] Test: partial capture releases the rest, hold account ends at zero
+- [x] Test: every illegal transition is refused
+- [x] Test: ledger still balances after a mixed run of all four operations
+
+66 tests.
+
+Each intent gets its own hold account rather than a "held" column on the customer. The
+amount held is then just that account's balance, so there's no second number to keep in
+step. Partial capture falls out of it: debit the whole hold, credit the merchant what was
+asked for, credit the customer the rest, one balanced transaction, hold ends at zero.
 
 ## Phase 4 - Outbox
 

@@ -1,0 +1,331 @@
+package com.stripeclone.payment;
+
+import com.stripeclone.common.Ids;
+import com.stripeclone.ledger.AccountType;
+import com.stripeclone.ledger.LedgerService;
+import com.stripeclone.ledger.LedgerTransaction;
+import com.stripeclone.ledger.TransactionKind;
+import com.stripeclone.money.Amount;
+import com.stripeclone.money.Currency;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.List;
+import java.util.Optional;
+
+/**
+ * Payment intents, charges and refunds, all of it sitting on the ledger.
+ *
+ * <p>Every money movement here goes through {@link LedgerService#post}, which means the
+ * zero-sum check, the account locking and the balance floor all apply without this class
+ * reimplementing any of it.
+ *
+ * <p>The hold account is what makes authorize and capture work. Confirming moves the money
+ * out of the customer's account and into a hold account belonging to that one intent.
+ * Capturing moves it from the hold to the merchant. Whatever's left over goes back to the
+ * customer in the same transaction. Because a hold is just an account, the amount held is
+ * always its balance, and there's no separate counter to drift.
+ */
+@Service
+public class PaymentService {
+
+    private static final Logger log = LoggerFactory.getLogger(PaymentService.class);
+
+    private final PaymentRepository repository;
+    private final LedgerService ledger;
+
+    public PaymentService(PaymentRepository repository, LedgerService ledger) {
+        this.repository = repository;
+        this.ledger = ledger;
+    }
+
+    @Transactional
+    public Customer createCustomer(String email, String name, Currency currency) {
+        String customerId = Ids.customer();
+        String accountId = Ids.account();
+
+        ledger.createAccount(accountId, AccountType.CUSTOMER, currency);
+        Customer customer = new Customer(customerId, email, name, accountId, null);
+        repository.insertCustomer(customer);
+
+        log.debug("Created customer {} with account {}", customerId, accountId);
+        return repository.findCustomer(customerId).orElseThrow();
+    }
+
+    @Transactional(readOnly = true)
+    public Optional<Customer> findCustomer(String customerId) {
+        return repository.findCustomer(customerId);
+    }
+
+    /**
+     * Creates an intent. No money moves yet; this only records what's being asked for.
+     */
+    @Transactional
+    public PaymentIntent createIntent(CreateIntentRequest request) {
+        if (!request.amount().isPositive()) {
+            throw PaymentException.invalidRequest("Amount must be greater than zero");
+        }
+
+        String intentId = Ids.paymentIntent();
+        Currency currency = request.amount().currency();
+
+        PaymentIntent intent = new PaymentIntent(
+                intentId,
+                request.customerId(),
+                request.customerAccount(),
+                request.merchantAccount(),
+                null,
+                request.amount(),
+                Amount.zero(currency),
+                Amount.zero(currency),
+                PaymentIntentStatus.REQUIRES_CONFIRMATION,
+                request.captureMethod(),
+                request.description(),
+                null,
+                null,
+                null);
+
+        repository.insertIntent(intent);
+        log.debug("Created payment intent {} for {}", intentId, request.amount());
+        return repository.findIntent(intentId).orElseThrow();
+    }
+
+    /**
+     * Confirms an intent, which moves the money out of the customer's account.
+     *
+     * <p>With automatic capture it goes straight to the merchant and the intent succeeds.
+     * With manual capture it goes into a hold account and waits.
+     */
+    @Transactional
+    public PaymentIntent confirm(String paymentIntentId) {
+        PaymentIntent intent = lockIntent(paymentIntentId);
+
+        if (intent.captureMethod() == CaptureMethod.MANUAL) {
+            PaymentIntentStateMachine.assertTransition(
+                    intent.status(), PaymentIntentStatus.REQUIRES_CAPTURE);
+
+            String holdAccount = Ids.account();
+            ledger.createAccount(holdAccount, AccountType.HOLD, intent.currency());
+            repository.setHoldAccount(paymentIntentId, holdAccount);
+
+            ledger.transfer(
+                    Ids.transaction(),
+                    TransactionKind.AUTHORIZATION,
+                    intent.customerAccount(),
+                    holdAccount,
+                    intent.amount(),
+                    "Authorization for " + paymentIntentId);
+
+            repository.updateIntentAmounts(
+                    paymentIntentId,
+                    PaymentIntentStatus.REQUIRES_CAPTURE,
+                    intent.amount(),
+                    Amount.zero(intent.currency()));
+
+            log.debug("Authorized {} on intent {}", intent.amount(), paymentIntentId);
+            return repository.findIntent(paymentIntentId).orElseThrow();
+        }
+
+        PaymentIntentStateMachine.assertTransition(
+                intent.status(), PaymentIntentStatus.SUCCEEDED);
+
+        String txnId = Ids.transaction();
+        ledger.transfer(
+                txnId,
+                TransactionKind.CAPTURE,
+                intent.customerAccount(),
+                intent.merchantAccount(),
+                intent.amount(),
+                "Payment " + paymentIntentId);
+
+        recordCharge(paymentIntentId, intent.amount(), txnId);
+        repository.updateIntentAmounts(
+                paymentIntentId,
+                PaymentIntentStatus.SUCCEEDED,
+                Amount.zero(intent.currency()),
+                intent.amount());
+
+        log.debug("Captured {} on intent {}", intent.amount(), paymentIntentId);
+        return repository.findIntent(paymentIntentId).orElseThrow();
+    }
+
+    /**
+     * Captures an authorized intent, in full or in part.
+     *
+     * <p>A partial capture sends the requested amount to the merchant and returns the rest
+     * to the customer, both in one balanced transaction. The hold account ends up empty
+     * either way, which is the property the tests check: money can't be left stranded.
+     *
+     * @param amount how much to capture, or null for the whole hold
+     */
+    @Transactional
+    public PaymentIntent capture(String paymentIntentId, Amount amount) {
+        PaymentIntent intent = lockIntent(paymentIntentId);
+        PaymentIntentStateMachine.assertTransition(
+                intent.status(), PaymentIntentStatus.SUCCEEDED);
+
+        Amount held = intent.amountCapturable();
+        Amount toCapture = amount == null ? held : amount;
+
+        if (!toCapture.isPositive()) {
+            throw PaymentException.invalidRequest("Capture amount must be greater than zero");
+        }
+        if (toCapture.isGreaterThan(held)) {
+            throw PaymentException.amountTooLarge(
+                    "Cannot capture " + toCapture + "; only " + held + " is authorized");
+        }
+
+        Amount remainder = held.minus(toCapture);
+        String txnId = Ids.transaction();
+
+        LedgerTransaction.Builder builder = LedgerTransaction
+                .builder(txnId, TransactionKind.CAPTURE)
+                .debit(intent.holdAccount(), held)
+                .credit(intent.merchantAccount(), toCapture)
+                .description("Capture for " + paymentIntentId);
+
+        if (remainder.isPositive()) {
+            // Give back what wasn't taken, rather than leaving it stuck in the hold.
+            builder.credit(intent.customerAccount(), remainder);
+        }
+
+        ledger.post(builder.build());
+        recordCharge(paymentIntentId, toCapture, txnId);
+
+        repository.updateIntentAmounts(
+                paymentIntentId,
+                PaymentIntentStatus.SUCCEEDED,
+                Amount.zero(intent.currency()),
+                toCapture);
+
+        log.debug("Captured {} of {} on intent {}, returned {}",
+                toCapture, held, paymentIntentId, remainder);
+        return repository.findIntent(paymentIntentId).orElseThrow();
+    }
+
+    /**
+     * Cancels an intent, releasing any hold back to the customer.
+     */
+    @Transactional
+    public PaymentIntent cancel(String paymentIntentId, String reason) {
+        PaymentIntent intent = lockIntent(paymentIntentId);
+        PaymentIntentStateMachine.assertTransition(
+                intent.status(), PaymentIntentStatus.CANCELED);
+
+        if (intent.amountCapturable().isPositive() && intent.holdAccount() != null) {
+            ledger.transfer(
+                    Ids.transaction(),
+                    TransactionKind.VOID,
+                    intent.holdAccount(),
+                    intent.customerAccount(),
+                    intent.amountCapturable(),
+                    "Void of " + paymentIntentId);
+        }
+
+        repository.setCancellation(paymentIntentId, reason);
+        log.debug("Canceled intent {} ({})", paymentIntentId, reason);
+        return repository.findIntent(paymentIntentId).orElseThrow();
+    }
+
+    /**
+     * Refunds a charge, in full or in part, moving money back from merchant to customer.
+     */
+    @Transactional
+    public Refund refund(String chargeId, Amount amount, String reason) {
+        Charge charge = repository.findChargeForUpdate(chargeId)
+                .orElseThrow(() -> new ChargeNotFoundException(chargeId));
+
+        Amount refundable = charge.refundable();
+        Amount toRefund = amount == null ? refundable : amount;
+
+        if (!toRefund.isPositive()) {
+            throw PaymentException.invalidRequest("Refund amount must be greater than zero");
+        }
+        if (toRefund.isGreaterThan(refundable)) {
+            throw PaymentException.chargeAlreadyRefunded(
+                    "Cannot refund " + toRefund + "; only " + refundable + " remains");
+        }
+
+        PaymentIntent intent = repository.findIntent(charge.paymentIntentId())
+                .orElseThrow(() -> new PaymentIntentNotFoundException(charge.paymentIntentId()));
+
+        String txnId = Ids.transaction();
+        ledger.transfer(
+                txnId,
+                TransactionKind.REFUND,
+                intent.merchantAccount(),
+                intent.customerAccount(),
+                toRefund,
+                "Refund of " + chargeId);
+
+        Amount newRefundedTotal = charge.amountRefunded().plus(toRefund);
+        Charge.ChargeStatus newStatus = newRefundedTotal.equals(charge.amount())
+                ? Charge.ChargeStatus.REFUNDED
+                : Charge.ChargeStatus.SUCCEEDED;
+        repository.updateChargeRefunded(chargeId, newRefundedTotal, newStatus);
+
+        Refund refund = new Refund(
+                Ids.refund(), chargeId, toRefund, reason,
+                Refund.RefundStatus.SUCCEEDED, txnId, null);
+        repository.insertRefund(refund);
+
+        log.debug("Refunded {} of charge {}", toRefund, chargeId);
+        return repository.findRefund(refund.refundId()).orElseThrow();
+    }
+
+    @Transactional(readOnly = true)
+    public PaymentIntent getIntent(String paymentIntentId) {
+        return repository.findIntent(paymentIntentId)
+                .orElseThrow(() -> new PaymentIntentNotFoundException(paymentIntentId));
+    }
+
+    @Transactional(readOnly = true)
+    public List<PaymentIntent> listIntents(int limit, String startingAfter) {
+        return repository.listIntents(limit, startingAfter);
+    }
+
+    @Transactional(readOnly = true)
+    public Charge getCharge(String chargeId) {
+        return repository.findCharge(chargeId)
+                .orElseThrow(() -> new ChargeNotFoundException(chargeId));
+    }
+
+    @Transactional(readOnly = true)
+    public List<Charge> chargesFor(String paymentIntentId) {
+        return repository.findChargesForIntent(paymentIntentId);
+    }
+
+    @Transactional(readOnly = true)
+    public List<Refund> refundsFor(String chargeId) {
+        return repository.findRefundsForCharge(chargeId);
+    }
+
+    private PaymentIntent lockIntent(String paymentIntentId) {
+        return repository.findIntentForUpdate(paymentIntentId)
+                .orElseThrow(() -> new PaymentIntentNotFoundException(paymentIntentId));
+    }
+
+    private void recordCharge(String paymentIntentId, Amount amount, String ledgerTxnId) {
+        Charge charge = new Charge(
+                Ids.charge(),
+                paymentIntentId,
+                amount,
+                Amount.zero(amount.currency()),
+                Charge.ChargeStatus.SUCCEEDED,
+                ledgerTxnId,
+                null);
+        repository.insertCharge(charge);
+    }
+
+    /** What's needed to open an intent. */
+    public record CreateIntentRequest(
+            String customerId,
+            String customerAccount,
+            String merchantAccount,
+            Amount amount,
+            CaptureMethod captureMethod,
+            String description
+    ) {}
+}
